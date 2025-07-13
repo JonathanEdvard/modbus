@@ -162,7 +162,10 @@ func (tt *tcpTransport) readMBAPFrame() (p *pdu, txnId uint16, err error) {
 	// validate the protocol identifier
 	if protocolId != 0x0000 {
 		err = ErrUnknownProtocolId
-		tt.logger.Warn(fmt.Sprintf("received unexpected protocol id 0x%04x", protocolId))
+		if tt.logger != nil {
+			tt.logger.Warn(fmt.Sprintf("received unexpected protocol id 0x%04x", protocolId))
+		}
+		// return early, no PDU object
 		return
 	}
 
