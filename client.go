@@ -54,9 +54,6 @@ type ClientConfiguration struct {
 	// the server (tcp+tls only). Leaf (i.e. server) certificates can also
 	// be used in case of self-signed certs, or if cert pinning is required.
 	TLSRootCAs *x509.CertPool
-	// Logger provides a custom sink for log messages.
-	// If nil, messages will be written to stdout.
-	Logger *slog.Logger
 }
 
 // Modbus client object.
@@ -72,7 +69,7 @@ type ModbusClient struct {
 }
 
 // NewClient creates, configures and returns a modbus client object.
-func NewClient(conf *ClientConfiguration) (mc *ModbusClient, err error) {
+func NewClient(conf *ClientConfiguration, logger *slog.Logger) (mc *ModbusClient, err error) {
 	var clientType string
 	var splitURL []string
 
@@ -86,7 +83,7 @@ func NewClient(conf *ClientConfiguration) (mc *ModbusClient, err error) {
 		mc.conf.URL = splitURL[1]
 	}
 
-	mc.logger = conf.Logger
+	mc.logger = logger
 
 	switch clientType {
 	case "rtu":
@@ -181,9 +178,9 @@ func NewClient(conf *ClientConfiguration) (mc *ModbusClient, err error) {
 
 	default:
 		if len(splitURL) != 2 {
-			mc.logger.Error("missing client type in URL '%s'", mc.conf.URL)
+			mc.logger.Error("missing client type in URL", "URL", mc.conf.URL)
 		} else {
-			mc.logger.Error("unsupported client type '%s'", clientType)
+			mc.logger.Error("unsupported type", "clientType", clientType)
 		}
 		err = ErrConfigurationError
 		return
@@ -226,7 +223,7 @@ func (mc *ModbusClient) Open() (err error) {
 
 		// create the RTU transport
 		mc.transport = newRTUTransport(
-			spw, mc.conf.URL, mc.conf.Speed, mc.conf.Timeout, mc.conf.Logger)
+			spw, mc.conf.Speed, mc.conf.Timeout, mc.logger)
 
 	case modbusRTUOverTCP:
 		// connect to the remote host
@@ -240,7 +237,7 @@ func (mc *ModbusClient) Open() (err error) {
 
 		// create the RTU transport
 		mc.transport = newRTUTransport(
-			sock, mc.conf.URL, mc.conf.Speed, mc.conf.Timeout, mc.conf.Logger)
+			sock, mc.conf.Speed, mc.conf.Timeout, mc.logger)
 
 	case modbusRTUOverUDP:
 		// open a socket to the remote host (note: no actual connection is
@@ -255,7 +252,7 @@ func (mc *ModbusClient) Open() (err error) {
 		// packets byte per byte
 		mc.transport = newRTUTransport(
 			newUDPSockWrapper(sock),
-			mc.conf.URL, mc.conf.Speed, mc.conf.Timeout, mc.conf.Logger)
+			mc.conf.Speed, mc.conf.Timeout, mc.logger)
 
 	case modbusTCP:
 		// connect to the remote host
@@ -265,7 +262,7 @@ func (mc *ModbusClient) Open() (err error) {
 		}
 
 		// create the TCP transport
-		mc.transport = newTCPTransport(sock, mc.conf.Timeout, mc.conf.Logger)
+		mc.transport = newTCPTransport(sock, mc.conf.Timeout, mc.logger)
 
 	case modbusTCPOverTLS:
 		// connect to the remote host with TLS
@@ -296,7 +293,7 @@ func (mc *ModbusClient) Open() (err error) {
 		// an adapter to work around write timeouts corrupting internal
 		// state (see https://pkg.go.dev/crypto/tls#Conn.SetWriteDeadline)
 		mc.transport = newTCPTransport(
-			newTLSSockWrapper(sock), mc.conf.Timeout, mc.conf.Logger)
+			newTLSSockWrapper(sock), mc.conf.Timeout, mc.logger)
 
 	case modbusTCPOverUDP:
 		// open a socket to the remote host (note: no actual connection is
@@ -310,7 +307,7 @@ func (mc *ModbusClient) Open() (err error) {
 		// an adapter to allow the transport to read the stream of
 		// packets byte per byte
 		mc.transport = newTCPTransport(
-			newUDPSockWrapper(sock), mc.conf.Timeout, mc.conf.Logger)
+			newUDPSockWrapper(sock), mc.conf.Timeout, mc.logger)
 
 	default:
 		// should never happen
@@ -348,13 +345,13 @@ func (mc *ModbusClient) SetEncoding(endianness Endianness, wordOrder WordOrder) 
 	defer mc.lock.Unlock()
 
 	if endianness != BIG_ENDIAN && endianness != LITTLE_ENDIAN {
-		mc.logger.Error("unknown endianness value %v", endianness)
+		mc.logger.Error("unknown endianness", "value", endianness)
 		err = ErrUnexpectedParameters
 		return
 	}
 
 	if wordOrder != HIGH_WORD_FIRST && wordOrder != LOW_WORD_FIRST {
-		mc.logger.Error("unknown word order value %v", wordOrder)
+		mc.logger.Error("unknown word order value", "wordOrder", wordOrder)
 		err = ErrUnexpectedParameters
 		return
 	}
@@ -599,7 +596,7 @@ func (mc *ModbusClient) WriteCoil(addr uint16, value bool) (err error) {
 			bytesToUint16(BIG_ENDIAN, res.payload[0:2]) != addr ||
 			// bytes 3-4 should either be {0xff, 0x00} or {0x00, 0x00}
 			// depending on the coil value
-			(value == true && res.payload[2] != 0xff) ||
+			(value && res.payload[2] != 0xff) ||
 			res.payload[3] != 0x00 {
 			err = ErrProtocolError
 			return
@@ -876,11 +873,9 @@ func (mc *ModbusClient) WriteRawBytes(addr uint16, values []byte) (err error) {
 /*** unexported methods ***/
 // Reads one or multiple 16-bit registers (function code 03 or 04) as bytes.
 func (mc *ModbusClient) readBytes(addr uint16, quantity uint16, regType RegType, observeEndianness bool) (values []byte, err error) {
-	var regCount uint16
-
 	// read enough registers to get the requested number of bytes
 	// (2 bytes per reg)
-	regCount = (quantity / 2) + (quantity % 2)
+	regCount := (quantity / 2) + (quantity % 2)
 
 	values, err = mc.readRegisters(addr, regCount, regType)
 	if err != nil {
@@ -1033,7 +1028,7 @@ func (mc *ModbusClient) readRegisters(addr uint16, quantity uint16, regType RegT
 		req.functionCode = fcReadInputRegisters
 	default:
 		err = ErrUnexpectedParameters
-		mc.logger.Error("unexpected register type (%v)", regType)
+		mc.logger.Error("unexpected register", "type", regType)
 		return
 	}
 
