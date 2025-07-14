@@ -5,8 +5,8 @@ import (
 	"math"
 )
 
-func uint16ToBytes(endianness Endianness, in uint16) (out []byte) {
-	out = make([]byte, 2)
+func uint16ToBytes(endianness Endianness, in uint16) []byte {
+	out := make([]byte, 2)
 	switch endianness {
 	case BIG_ENDIAN:
 		binary.BigEndian.PutUint16(out, in)
@@ -14,68 +14,68 @@ func uint16ToBytes(endianness Endianness, in uint16) (out []byte) {
 		binary.LittleEndian.PutUint16(out, in)
 	}
 
-	return
+	return out
 }
 
-func uint16sToBytes(endianness Endianness, in []uint16) (out []byte) {
-	out = make([]byte, 2*len(in))
+func uint16sToBytes(endianness Endianness, in []uint16) []byte {
+	out := make([]byte, 0, 2*len(in))
 	for i := range in {
-		copy(out[2*i:], uint16ToBytes(endianness, in[i]))
+		out = append(out, uint16ToBytes(endianness, in[i])...)
 	}
 
-	return
+	return out
 }
 
-func bytesToUint16(endianness Endianness, in []byte) (out uint16) {
+func bytesToUint16(endianness Endianness, in []byte) uint16 {
 	switch endianness {
 	case BIG_ENDIAN:
-		out = binary.BigEndian.Uint16(in)
+		return binary.BigEndian.Uint16(in)
 	case LITTLE_ENDIAN:
-		out = binary.LittleEndian.Uint16(in)
+		return binary.LittleEndian.Uint16(in)
 	}
 
-	return
+	return 0
 }
 
-func bytesToUint16s(endianness Endianness, in []byte) (out []uint16) {
-	out = make([]uint16, len(in)/2)
-	for i := range out {
-		out[i] = bytesToUint16(endianness, in[2*i:2*i+2])
+func bytesToUint16s(endianness Endianness, in []byte) []uint16 {
+	out := make([]uint16, 0, len(in)/2)
+	for i := 0; i < len(in); i += 2 {
+		out = append(out, bytesToUint16(endianness, in[i:i+2]))
 	}
 
-	return
+	return out
 }
 
-func bytesToUint32s(endianness Endianness, wordOrder WordOrder, in []byte) (out []uint32) {
-	out = make([]uint32, len(in)/4)
+func bytesToUint32s(endianness Endianness, wordOrder WordOrder, in []byte) []uint32 {
+	out := make([]uint32, 0, len(in)/4)
 	var u32 uint32
 
-	for i := range out {
+	for i := 0; i < len(in); i += 4 {
 		switch endianness {
 		case BIG_ENDIAN:
 			if wordOrder == HIGH_WORD_FIRST {
-				u32 = binary.BigEndian.Uint32(in[4*i : 4*i+4])
+				u32 = binary.BigEndian.Uint32(in[i : i+4])
 			} else {
 				u32 = binary.BigEndian.Uint32(
-					[]byte{in[4*i+2], in[4*i+3], in[4*i+0], in[4*i+1]})
+					[]byte{in[i+2], in[i+3], in[i+0], in[i+1]})
 			}
 		case LITTLE_ENDIAN:
 			if wordOrder == LOW_WORD_FIRST {
-				u32 = binary.LittleEndian.Uint32(in[4*i : 4*i+4])
+				u32 = binary.LittleEndian.Uint32(in[i : i+4])
 			} else {
 				u32 = binary.LittleEndian.Uint32(
-					[]byte{in[4*i+2], in[4*i+3], in[4*i+0], in[4*i+1]})
+					[]byte{in[i+2], in[i+3], in[i+0], in[i+1]})
 			}
 		}
 
-		out[i] = u32
+		out = append(out, u32)
 	}
 
-	return
+	return out
 }
 
-func uint32ToBytes(endianness Endianness, wordOrder WordOrder, in uint32) (out []byte) {
-	out = make([]byte, 4)
+func uint32ToBytes(endianness Endianness, wordOrder WordOrder, in uint32) []byte {
+	out := make([]byte, 4)
 
 	switch endianness {
 	case BIG_ENDIAN:
@@ -92,58 +92,56 @@ func uint32ToBytes(endianness Endianness, wordOrder WordOrder, in uint32) (out [
 		}
 	}
 
-	return
+	return out
 }
 
-func bytesToFloat32s(endianness Endianness, wordOrder WordOrder, in []byte) (out []float32) {
+func bytesToFloat32s(endianness Endianness, wordOrder WordOrder, in []byte) []float32 {
 	u32s := bytesToUint32s(endianness, wordOrder, in)
-	out = make([]float32, len(u32s))
+	out := make([]float32, 0, len(u32s))
 
-	for i, u32 := range u32s {
-		out[i] = math.Float32frombits(u32)
+	for _, u32 := range u32s {
+		out = append(out, math.Float32frombits(u32))
 	}
 
-	return
+	return out
 }
 
-func float32ToBytes(endianness Endianness, wordOrder WordOrder, in float32) (out []byte) {
-	out = uint32ToBytes(endianness, wordOrder, math.Float32bits(in))
-
-	return
+func float32ToBytes(endianness Endianness, wordOrder WordOrder, in float32) []byte {
+	return uint32ToBytes(endianness, wordOrder, math.Float32bits(in))
 }
 
-func bytesToUint64s(endianness Endianness, wordOrder WordOrder, in []byte) (out []uint64) {
-	out = make([]uint64, len(in)/8)
+func bytesToUint64s(endianness Endianness, wordOrder WordOrder, in []byte) []uint64 {
+	out := make([]uint64, 0, len(in)/8)
 	var u64 uint64
 
-	for i := range out {
+	for i := 0; i < len(in); i += 8 {
 		switch endianness {
 		case BIG_ENDIAN:
 			if wordOrder == HIGH_WORD_FIRST {
-				u64 = binary.BigEndian.Uint64(in[8*i : 8*i+8])
+				u64 = binary.BigEndian.Uint64(in[i : i+8])
 			} else {
 				u64 = binary.BigEndian.Uint64(
-					[]byte{in[8*i+6], in[8*i+7], in[8*i+4], in[8*i+5],
-						in[8*i+2], in[8*i+3], in[8*i+0], in[8*i+1]})
+					[]byte{in[i+6], in[i+7], in[i+4], in[i+5],
+						in[i+2], in[i+3], in[i+0], in[i+1]})
 			}
 		case LITTLE_ENDIAN:
 			if wordOrder == LOW_WORD_FIRST {
-				u64 = binary.LittleEndian.Uint64(in[8*i : 8*i+8])
+				u64 = binary.LittleEndian.Uint64(in[i : i+8])
 			} else {
 				u64 = binary.LittleEndian.Uint64(
-					[]byte{in[8*i+6], in[8*i+7], in[8*i+4], in[8*i+5],
-						in[8*i+2], in[8*i+3], in[8*i+0], in[8*i+1]})
+					[]byte{in[i+6], in[i+7], in[i+4], in[i+5],
+						in[i+2], in[i+3], in[i+0], in[i+1]})
 			}
 		}
 
-		out[i] = u64
+		out = append(out, u64)
 	}
 
-	return
+	return out
 }
 
-func uint64ToBytes(endianness Endianness, wordOrder WordOrder, in uint64) (out []byte) {
-	out = make([]byte, 8)
+func uint64ToBytes(endianness Endianness, wordOrder WordOrder, in uint64) []byte {
+	out := make([]byte, 8)
 
 	switch endianness {
 	case BIG_ENDIAN:
@@ -162,47 +160,45 @@ func uint64ToBytes(endianness Endianness, wordOrder WordOrder, in uint64) (out [
 		}
 	}
 
-	return
+	return out
 }
 
-func bytesToFloat64s(endianness Endianness, wordOrder WordOrder, in []byte) (out []float64) {
+func bytesToFloat64s(endianness Endianness, wordOrder WordOrder, in []byte) []float64 {
 	u64s := bytesToUint64s(endianness, wordOrder, in)
-	out = make([]float64, len(u64s))
+	out := make([]float64, 0, len(u64s))
 
-	for i, u64 := range u64s {
-		out[i] = math.Float64frombits(u64)
+	for _, u64 := range u64s {
+		out = append(out, math.Float64frombits(u64))
 	}
 
-	return
+	return out
 }
 
-func float64ToBytes(endianness Endianness, wordOrder WordOrder, in float64) (out []byte) {
-	out = uint64ToBytes(endianness, wordOrder, math.Float64bits(in))
-
-	return
+func float64ToBytes(endianness Endianness, wordOrder WordOrder, in float64) []byte {
+	return uint64ToBytes(endianness, wordOrder, math.Float64bits(in))
 }
 
-func encodeBools(in []bool) (out []byte) {
+func encodeBools(in []bool) []byte {
 	byteCount := uint(len(in)) / 8
 	if len(in)%8 != 0 {
 		byteCount++
 	}
 
-	out = make([]byte, byteCount)
+	out := make([]byte, byteCount)
 	for i := uint(0); i < uint(len(in)); i++ {
 		if in[i] {
 			out[i/8] |= (0x01 << (i % 8))
 		}
 	}
 
-	return
+	return out
 }
 
-func decodeBools(quantity uint16, in []byte) (out []bool) {
-	out = make([]bool, quantity)
+func decodeBools(quantity uint16, in []byte) []bool {
+	out := make([]bool, quantity)
 	for i := uint(0); i < uint(quantity); i++ {
 		out[i] = (((in[i/8] >> (i % 8)) & 0x01) == 0x01)
 	}
 
-	return
+	return out
 }

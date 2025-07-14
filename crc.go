@@ -39,12 +39,10 @@ type crc struct {
 	crc uint16
 }
 
-// Prepares the CRC generator for use.
 func (c *crc) init() {
 	c.crc = 0xffff
 }
 
-// Adds the given bytes to the CRC.
 func (c *crc) add(in []byte) {
 	var index byte
 
@@ -55,11 +53,10 @@ func (c *crc) add(in []byte) {
 	}
 }
 
-// Returns the CRC as two bytes, swapped.
 func (c *crc) value() []byte {
 	return uint16ToBytes(LITTLE_ENDIAN, c.crc)
 }
 
 func (c *crc) isEqual(low byte, high byte) bool {
-	return (bytesToUint16(LITTLE_ENDIAN, []byte{low, high}) == c.crc)
+	return bytesToUint16(LITTLE_ENDIAN, []byte{low, high}) == c.crc
 }

@@ -28,12 +28,12 @@ type rtuLink interface {
 }
 
 // Returns a new RTU transport.
-func newRTUTransport(link rtuLink, speed uint, timeout time.Duration, logger *slog.Logger) (rt *rtuTransport) {
-	rt = &rtuTransport{
-		logger:  logger.With("modbus", "RTU transport"),
+func newRTUTransport(link rtuLink, speed uint32, timeout time.Duration, logger *slog.Logger) *rtuTransport {
+	rt := &rtuTransport{
 		link:    link,
-		timeout: timeout,
 		t1:      serialCharTime(speed),
+		timeout: timeout,
+		logger:  logger.With("modbus.transport", "rtu"),
 	}
 
 	if speed >= 19200 {
@@ -42,25 +42,22 @@ func newRTUTransport(link rtuLink, speed uint, timeout time.Duration, logger *sl
 		rt.t35 = (serialCharTime(speed) * 35) / 10
 	}
 
-	return
+	return rt
 }
 
-// Closes the rtu link.
-func (rt *rtuTransport) Close() (err error) {
-	err = rt.link.Close()
-
-	return
+func (rt *rtuTransport) Close() error {
+	return rt.link.Close()
 }
 
-// Runs a request across the rtu link and returns a response.
-func (rt *rtuTransport) ExecuteRequest(req *pdu) (res *pdu, err error) {
+func (rt *rtuTransport) ExecuteRequest(req *pdu) (*pdu, error) {
 	var ts time.Time
 	var t time.Duration
 	var n int
+	var err error
 
 	err = rt.link.SetDeadline(time.Now().Add(rt.timeout))
 	if err != nil {
-		return
+		return nil, err
 	}
 
 	t = time.Since(rt.lastActivity.Add(rt.t35))
@@ -72,14 +69,14 @@ func (rt *rtuTransport) ExecuteRequest(req *pdu) (res *pdu, err error) {
 
 	n, err = rt.link.Write(rt.assembleRTUFrame(req))
 	if err != nil {
-		return
+		return nil, err
 	}
 
 	rt.lastActivity = ts.Add(time.Duration(n) * rt.t1)
 
 	time.Sleep(time.Until(rt.lastActivity.Add(rt.t35)))
 
-	res, err = rt.readRTUFrame()
+	res, err := rt.readRTUFrame()
 
 	if err == ErrBadCRC || err == ErrProtocolError || err == ErrShortFrame {
 		time.Sleep(time.Duration(maxRTUFrameLength) * rt.t1)
@@ -90,93 +87,82 @@ func (rt *rtuTransport) ExecuteRequest(req *pdu) (res *pdu, err error) {
 		rt.lastActivity = time.Now()
 	}
 
-	return
+	return res, err
 }
 
-// Reads a request from the rtu link.
-func (rt *rtuTransport) ReadRequest() (req *pdu, err error) {
-	err = fmt.Errorf("unimplemented")
-
-	return
+func (rt *rtuTransport) ReadRequest() (*pdu, error) {
+	return nil, fmt.Errorf("unimplemented")
 }
 
-// Writes a response to the rtu link.
-func (rt *rtuTransport) WriteResponse(res *pdu) (err error) {
+func (rt *rtuTransport) WriteResponse(res *pdu) error {
 	var n int
+	var err error
 
 	n, err = rt.link.Write(rt.assembleRTUFrame(res))
 	if err != nil {
-		return
+		return err
 	}
 
 	rt.lastActivity = time.Now().Add(rt.t1 * time.Duration(n))
 
-	return
+	return nil
 }
 
-// Waits for, reads and decodes a frame from the rtu link.
-func (rt *rtuTransport) readRTUFrame() (res *pdu, err error) {
+func (rt *rtuTransport) readRTUFrame() (*pdu, error) {
 	var rxbuf []byte
 	var byteCount int
 	var bytesNeeded int
 	var crc crc
+	var err error
 
 	rxbuf = make([]byte, maxRTUFrameLength)
 
 	byteCount, err = io.ReadFull(rt.link, rxbuf[0:3])
 	if (byteCount > 0 || err == nil) && byteCount != 3 {
-		err = ErrShortFrame
-		return
+		return nil, ErrShortFrame
 	}
 	if err != nil && err != io.ErrUnexpectedEOF {
-		return
+		return nil, err
 	}
 
 	bytesNeeded, err = expectedResponseLength(uint8(rxbuf[1]), uint8(rxbuf[2]))
 	if err != nil {
-		return
+		return nil, err
 	}
 
 	bytesNeeded += 2
 
 	if byteCount+bytesNeeded > maxRTUFrameLength {
-		err = ErrProtocolError
-		return
+		return nil, ErrProtocolError
 	}
 
 	byteCount, err = io.ReadFull(rt.link, rxbuf[3:3+bytesNeeded])
 	if err != nil && err != io.ErrUnexpectedEOF {
-		return
+		return nil, err
 	}
 	if byteCount != bytesNeeded {
-		rt.logger.Warn("short response", "expected", bytesNeeded, "got", byteCount)
-		err = ErrShortFrame
-		return
+		rt.logger.Warn("wrong byteCount", "expected", bytesNeeded, "received", byteCount)
+		return nil, ErrShortFrame
 	}
 
 	crc.init()
 	crc.add(rxbuf[0 : 3+bytesNeeded-2])
 
 	if !crc.isEqual(rxbuf[3+bytesNeeded-2], rxbuf[3+bytesNeeded-1]) {
-		err = ErrBadCRC
-		return
+		return nil, ErrBadCRC
 	}
 
-	res = &pdu{
+	return &pdu{
 		unitId:       rxbuf[0],
 		functionCode: rxbuf[1],
 		payload:      rxbuf[2 : 3+bytesNeeded-2],
-	}
-
-	return
+	}, nil
 }
 
-// Turns a PDU object into bytes.
-func (rt *rtuTransport) assembleRTUFrame(p *pdu) (adu []byte) {
+func (rt *rtuTransport) assembleRTUFrame(p *pdu) []byte {
 	var crc crc
 
-	adu = append(adu, p.unitId)
-	adu = append(adu, p.functionCode)
+	adu := []byte{p.unitId, p.functionCode}
 	adu = append(adu, p.payload...)
 
 	crc.init()
@@ -184,24 +170,23 @@ func (rt *rtuTransport) assembleRTUFrame(p *pdu) (adu []byte) {
 
 	adu = append(adu, crc.value()...)
 
-	return
+	return adu
 }
 
-// Computes the expected length of a modbus RTU response.
-func expectedResponseLength(responseCode uint8, responseLength uint8) (byteCount int, err error) {
+func expectedResponseLength(responseCode uint8, responseLength uint8) (int, error) {
 	switch responseCode {
 	case fcReadHoldingRegisters,
 		fcReadInputRegisters,
 		fcReadCoils,
 		fcReadDiscreteInputs:
-		byteCount = int(responseLength)
+		return int(responseLength), nil
 	case fcWriteSingleRegister,
 		fcWriteMultipleRegisters,
 		fcWriteSingleCoil,
 		fcWriteMultipleCoils:
-		byteCount = 3
+		return 3, nil
 	case fcMaskWriteRegister:
-		byteCount = 5
+		return 5, nil
 	case fcReadHoldingRegisters | 0x80,
 		fcReadInputRegisters | 0x80,
 		fcReadCoils | 0x80,
@@ -211,28 +196,19 @@ func expectedResponseLength(responseCode uint8, responseLength uint8) (byteCount
 		fcWriteSingleCoil | 0x80,
 		fcWriteMultipleCoils | 0x80,
 		fcMaskWriteRegister | 0x80:
-		byteCount = 0
+		return 0, nil
 	default:
-		err = ErrProtocolError
+		return 0, ErrProtocolError
 	}
-
-	return
 }
 
-// Discards the contents of the link's rx buffer, eating up to 1kB of data.
-// Note that on a serial line, this call may block for up to serialConf.Timeout
-// i.e. 10ms.
 func discard(link rtuLink) {
-	var rxbuf = make([]byte, 1024)
+	rxbuf := make([]byte, 1024)
 
 	_ = link.SetDeadline(time.Now().Add(500 * time.Microsecond))
 	_, _ = io.ReadFull(link, rxbuf)
 }
 
-// Returns how long it takes to send 1 byte on a serial line at the
-// specified baud rate.
-func serialCharTime(rate_bps uint) (ct time.Duration) {
-	ct = (11) * time.Second / time.Duration(rate_bps)
-
-	return
+func serialCharTime(rate_bps uint32) time.Duration {
+	return 11 * time.Second / time.Duration(rate_bps)
 }
