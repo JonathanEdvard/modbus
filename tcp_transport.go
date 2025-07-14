@@ -21,11 +21,11 @@ type tcpTransport struct {
 }
 
 // Returns a new TCP transport.
-func newTCPTransport(socket net.Conn, timeout time.Duration, customLogger *slog.Logger) (tt *tcpTransport) {
+func newTCPTransport(socket net.Conn, timeout time.Duration, logger *slog.Logger) (tt *tcpTransport) {
 	tt = &tcpTransport{
 		socket:  socket,
 		timeout: timeout,
-		logger:  customLogger,
+		logger:  logger,
 	}
 
 	return
@@ -163,7 +163,7 @@ func (tt *tcpTransport) readMBAPFrame() (p *pdu, txnId uint16, err error) {
 	if protocolId != 0x0000 {
 		err = ErrUnknownProtocolId
 		if tt.logger != nil {
-			tt.logger.Warn(fmt.Sprintf("received unexpected protocol id 0x%04x", protocolId))
+			tt.logger.Warn("received unexpected protocol id", "protocolId", fmt.Sprintf("%04X", protocolId))
 		}
 		// return early, no PDU object
 		return

@@ -28,9 +28,9 @@ type rtuLink interface {
 }
 
 // Returns a new RTU transport.
-func newRTUTransport(link rtuLink, addr string, speed uint, timeout time.Duration, logger *slog.Logger) (rt *rtuTransport) {
+func newRTUTransport(link rtuLink, speed uint, timeout time.Duration, logger *slog.Logger) (rt *rtuTransport) {
 	rt = &rtuTransport{
-		logger:  logger,
+		logger:  logger.With("modbus", "RTU transport"),
 		link:    link,
 		timeout: timeout,
 		t1:      serialCharTime(speed),
@@ -89,7 +89,7 @@ func (rt *rtuTransport) ExecuteRequest(req *pdu) (res *pdu, err error) {
 	rt.lastActivity = ts.Add(time.Duration(n) * rt.t1)
 
 	// observe inter-frame delays
-	time.Sleep(rt.lastActivity.Add(rt.t35).Sub(time.Now()))
+	time.Sleep(time.Until(rt.lastActivity.Add(rt.t35)))
 
 	// read the response back from the wire
 	res, err = rt.readRTUFrame()
@@ -254,10 +254,8 @@ func expectedResponseLenth(responseCode uint8, responseLength uint8) (byteCount 
 func discard(link rtuLink) {
 	var rxbuf = make([]byte, 1024)
 
-	link.SetDeadline(time.Now().Add(500 * time.Microsecond))
-	io.ReadFull(link, rxbuf)
-
-	return
+	_ = link.SetDeadline(time.Now().Add(500 * time.Microsecond))
+	_, _ = io.ReadFull(link, rxbuf)
 }
 
 // Returns how long it takes to send 1 byte on a serial line at the
