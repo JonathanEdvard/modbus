@@ -192,8 +192,6 @@ func NewClient(conf *ClientConfiguration, logger *slog.Logger) (*ModbusClient, e
 // Opens the underlying transport (network socket or serial line).
 func (mc *ModbusClient) Open() error {
 	var spw *serialPortWrapper
-	var sock net.Conn
-	var err error
 
 	mc.lock.Lock()
 	defer mc.lock.Unlock()
@@ -210,7 +208,7 @@ func (mc *ModbusClient) Open() error {
 		})
 
 		// open the serial device
-		err = spw.Open()
+		err := spw.Open()
 		if err != nil {
 			return err
 		}
@@ -224,7 +222,7 @@ func (mc *ModbusClient) Open() error {
 
 	case modbusRTUOverTCP:
 		// connect to the remote host
-		sock, err = net.DialTimeout("tcp", mc.config.URL, 5*time.Second)
+		sock, err := net.DialTimeout("tcp", mc.config.URL, 5*time.Second)
 		if err != nil {
 			return err
 		}
@@ -233,13 +231,12 @@ func (mc *ModbusClient) Open() error {
 		discard(sock)
 
 		// create the RTU transport
-		mc.transport = newRTUTransport(
-			sock, mc.config.Speed, mc.config.Timeout, mc.logger)
+		mc.transport = newRTUTransport(sock, mc.config.Speed, mc.config.Timeout, mc.logger)
 
 	case modbusRTUOverUDP:
 		// open a socket to the remote host (note: no actual connection is
 		// being made as UDP is connection-less)
-		sock, err = net.DialTimeout("udp", mc.config.URL, 5*time.Second)
+		sock, err := net.DialTimeout("udp", mc.config.URL, 5*time.Second)
 		if err != nil {
 			return err
 		}
@@ -253,7 +250,7 @@ func (mc *ModbusClient) Open() error {
 
 	case modbusTCP:
 		// connect to the remote host
-		sock, err = net.DialTimeout("tcp", mc.config.URL, 5*time.Second)
+		sock, err := net.DialTimeout("tcp", mc.config.URL, 5*time.Second)
 		if err != nil {
 			return err
 		}
@@ -263,7 +260,8 @@ func (mc *ModbusClient) Open() error {
 
 	case modbusTCPOverTLS:
 		// connect to the remote host with TLS
-		sock, err = tls.DialWithDialer(
+		var sock net.Conn
+		sock, err := tls.DialWithDialer(
 			&net.Dialer{
 				Deadline: time.Now().Add(15 * time.Second),
 			}, "tcp", mc.config.URL,
@@ -295,7 +293,7 @@ func (mc *ModbusClient) Open() error {
 	case modbusTCPOverUDP:
 		// open a socket to the remote host (note: no actual connection is
 		// being made as UDP is connection-less)
-		sock, err = net.DialTimeout("udp", mc.config.URL, 5*time.Second)
+		sock, err := net.DialTimeout("udp", mc.config.URL, 5*time.Second)
 		if err != nil {
 			return err
 		}
