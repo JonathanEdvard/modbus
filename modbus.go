@@ -54,10 +54,6 @@ const (
 	fcReadWriteMultipleRegisters uint8 = 0x17
 	fcReadFifoQueue              uint8 = 0x18
 
-	// file access
-	//fcReadFileRecord             uint8 = 0x14
-	//fcWriteFileRecord            uint8 = 0x15
-
 	// exception codes
 	exIllegalFunction         uint8 = 0x01
 	exIllegalDataAddress      uint8 = 0x02

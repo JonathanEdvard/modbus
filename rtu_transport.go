@@ -37,11 +37,8 @@ func newRTUTransport(link rtuLink, speed uint, timeout time.Duration, logger *sl
 	}
 
 	if speed >= 19200 {
-		// for baud rates equal to or greater than 19200 bauds, a fixed value of
-		// 1750 uS is specified for t3.5.
 		rt.t35 = 1750 * time.Microsecond
 	} else {
-		// for lower baud rates, the inter-frame delay should be 3.5 character times
 		rt.t35 = (serialCharTime(speed) * 35) / 10
 	}
 
@@ -61,14 +58,11 @@ func (rt *rtuTransport) ExecuteRequest(req *pdu) (res *pdu, err error) {
 	var t time.Duration
 	var n int
 
-	// set an i/o deadline on the link
 	err = rt.link.SetDeadline(time.Now().Add(rt.timeout))
 	if err != nil {
 		return
 	}
 
-	// if the line was active less than 3.5 char times ago,
-	// let t3.5 expire before transmitting
 	t = time.Since(rt.lastActivity.Add(rt.t35))
 	if t < 0 {
 		time.Sleep(t * (-1))
@@ -76,32 +70,22 @@ func (rt *rtuTransport) ExecuteRequest(req *pdu) (res *pdu, err error) {
 
 	ts = time.Now()
 
-	// build an RTU ADU out of the request object and
-	// send the final ADU+CRC on the wire
 	n, err = rt.link.Write(rt.assembleRTUFrame(req))
 	if err != nil {
 		return
 	}
 
-	// estimate how long the serial line was busy for.
-	// note that on most platforms, Write() will be buffered and return
-	// immediately rather than block until the buffer is drained
 	rt.lastActivity = ts.Add(time.Duration(n) * rt.t1)
 
-	// observe inter-frame delays
 	time.Sleep(time.Until(rt.lastActivity.Add(rt.t35)))
 
-	// read the response back from the wire
 	res, err = rt.readRTUFrame()
 
 	if err == ErrBadCRC || err == ErrProtocolError || err == ErrShortFrame {
-		// wait for and flush any data coming off the link to allow
-		// devices to re-sync
 		time.Sleep(time.Duration(maxRTUFrameLength) * rt.t1)
 		discard(rt.link)
 	}
 
-	// mark the time if we heard anything back
 	if err != ErrRequestTimedOut {
 		rt.lastActivity = time.Now()
 	}
@@ -111,7 +95,6 @@ func (rt *rtuTransport) ExecuteRequest(req *pdu) (res *pdu, err error) {
 
 // Reads a request from the rtu link.
 func (rt *rtuTransport) ReadRequest() (req *pdu, err error) {
-	// reading requests from RTU links is currently unsupported
 	err = fmt.Errorf("unimplemented")
 
 	return
@@ -121,8 +104,6 @@ func (rt *rtuTransport) ReadRequest() (req *pdu, err error) {
 func (rt *rtuTransport) WriteResponse(res *pdu) (err error) {
 	var n int
 
-	// build an RTU ADU out of the request object and
-	// send the final ADU+CRC on the wire
 	n, err = rt.link.Write(rt.assembleRTUFrame(res))
 	if err != nil {
 		return
@@ -142,8 +123,6 @@ func (rt *rtuTransport) readRTUFrame() (res *pdu, err error) {
 
 	rxbuf = make([]byte, maxRTUFrameLength)
 
-	// read the serial ADU header: unit id (1 byte), function code (1 byte) and
-	// PDU length/exception code (1 byte)
 	byteCount, err = io.ReadFull(rt.link, rxbuf[0:3])
 	if (byteCount > 0 || err == nil) && byteCount != 3 {
 		err = ErrShortFrame
@@ -153,16 +132,13 @@ func (rt *rtuTransport) readRTUFrame() (res *pdu, err error) {
 		return
 	}
 
-	// figure out how many further bytes to read
-	bytesNeeded, err = expectedResponseLenth(uint8(rxbuf[1]), uint8(rxbuf[2]))
+	bytesNeeded, err = expectedResponseLength(uint8(rxbuf[1]), uint8(rxbuf[2]))
 	if err != nil {
 		return
 	}
 
-	// we need to read 2 additional bytes of CRC after the payload
 	bytesNeeded += 2
 
-	// never read more than the max allowed frame length
 	if byteCount+bytesNeeded > maxRTUFrameLength {
 		err = ErrProtocolError
 		return
@@ -173,16 +149,14 @@ func (rt *rtuTransport) readRTUFrame() (res *pdu, err error) {
 		return
 	}
 	if byteCount != bytesNeeded {
-		rt.logger.Warn(fmt.Sprintf("expected %v bytes, received %v", bytesNeeded, byteCount))
+		rt.logger.Warn("short response", "expected", bytesNeeded, "got", byteCount)
 		err = ErrShortFrame
 		return
 	}
 
-	// compute the CRC on the entire frame, excluding the CRC
 	crc.init()
 	crc.add(rxbuf[0 : 3+bytesNeeded-2])
 
-	// compare CRC values
 	if !crc.isEqual(rxbuf[3+bytesNeeded-2], rxbuf[3+bytesNeeded-1]) {
 		err = ErrBadCRC
 		return
@@ -191,8 +165,7 @@ func (rt *rtuTransport) readRTUFrame() (res *pdu, err error) {
 	res = &pdu{
 		unitId:       rxbuf[0],
 		functionCode: rxbuf[1],
-		// pass the byte count + trailing data as payload, withtout the CRC
-		payload: rxbuf[2 : 3+bytesNeeded-2],
+		payload:      rxbuf[2 : 3+bytesNeeded-2],
 	}
 
 	return
@@ -206,18 +179,16 @@ func (rt *rtuTransport) assembleRTUFrame(p *pdu) (adu []byte) {
 	adu = append(adu, p.functionCode)
 	adu = append(adu, p.payload...)
 
-	// run the ADU through the CRC generator
 	crc.init()
 	crc.add(adu)
 
-	// append the CRC to the ADU
 	adu = append(adu, crc.value()...)
 
 	return
 }
 
 // Computes the expected length of a modbus RTU response.
-func expectedResponseLenth(responseCode uint8, responseLength uint8) (byteCount int, err error) {
+func expectedResponseLength(responseCode uint8, responseLength uint8) (byteCount int, err error) {
 	switch responseCode {
 	case fcReadHoldingRegisters,
 		fcReadInputRegisters,
@@ -261,11 +232,6 @@ func discard(link rtuLink) {
 // Returns how long it takes to send 1 byte on a serial line at the
 // specified baud rate.
 func serialCharTime(rate_bps uint) (ct time.Duration) {
-	// note: an RTU byte on the wire is:
-	// - 1 start bit,
-	// - 8 data bits,
-	// - 1 parity or stop bit
-	// - 1 stop bit
 	ct = (11) * time.Second / time.Duration(rate_bps)
 
 	return

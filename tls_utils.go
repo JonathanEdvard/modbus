@@ -3,18 +3,17 @@ package modbus
 import (
 	"crypto/x509"
 	"fmt"
-	"io/ioutil"
-	"net"
 	"os"
 	"time"
+
+	"io/ioutil"
+	"net"
 )
 
 // LoadCertPool loads a certificate store from a file into a CertPool object.
 func LoadCertPool(filePath string) (cp *x509.CertPool, err error) {
 	var buf []byte
 
-	// read the entire cert store, which may contain zero, one
-	// or more certificates
 	buf, err = ioutil.ReadFile(filePath)
 	if err != nil {
 		return
@@ -25,12 +24,8 @@ func LoadCertPool(filePath string) (cp *x509.CertPool, err error) {
 		return
 	}
 
-	// add these certs to the pool
 	cp = x509.NewCertPool()
-	cp.AppendCertsFromPEM(buf)
-
-	// let the caller know if no usable certificate was found
-	if len(cp.Subjects()) == 0 {
+	if !cp.AppendCertsFromPEM(buf) {
 		err = fmt.Errorf("%v: no certificate found", filePath)
 		return
 	}
@@ -63,15 +58,6 @@ func (tsw *tlsSockWrapper) Read(buf []byte) (rlen int, err error) {
 func (tsw *tlsSockWrapper) Write(buf []byte) (wlen int, err error) {
 	wlen, err = tsw.sock.Write(buf)
 
-	// since write timeouts corrupt the internal state of TLS sockets,
-	// any subsequent read/write operation will fail and return the same write
-	// timeout error (see https://pkg.go.dev/crypto/tls#Conn.SetWriteDeadline).
-	// this isn't all that helpful to clients, which may be tricked into
-	// retrying forever, treating timeout errors as transient.
-	// to avoid this, close the TLS socket after the first write timeout.
-	// this ensures that clients 1) get a timeout error on the first write timeout
-	// and 2) get an ErrNetClosing "use of closed network connection" on subsequent
-	// operations.
 	if err != nil && os.IsTimeout(err) {
 		tsw.sock.Close()
 	}
