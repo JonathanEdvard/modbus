@@ -17,7 +17,7 @@ type serialPortWrapper struct {
 
 type serialPortConfig struct {
 	Device   string
-	Speed    uint32
+	Speed    uint
 	DataBits uint8
 	Parity   uint8
 	StopBits uint8

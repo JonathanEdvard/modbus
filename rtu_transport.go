@@ -28,7 +28,7 @@ type rtuLink interface {
 }
 
 // Returns a new RTU transport.
-func newRTUTransport(link rtuLink, speed uint32, timeout time.Duration, logger *slog.Logger) *rtuTransport {
+func newRTUTransport(link rtuLink, speed uint, timeout time.Duration, logger *slog.Logger) *rtuTransport {
 	rt := &rtuTransport{
 		link:    link,
 		t1:      serialCharTime(speed),
@@ -209,6 +209,6 @@ func discard(link rtuLink) {
 	_, _ = io.ReadFull(link, rxbuf)
 }
 
-func serialCharTime(rate_bps uint32) time.Duration {
+func serialCharTime(rate_bps uint) time.Duration {
 	return 11 * time.Second / time.Duration(rate_bps)
 }

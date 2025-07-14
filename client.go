@@ -39,7 +39,7 @@ type ClientConfiguration struct {
 	// <mode>://<serial device or host:port> e.g. tcp://plc:502
 	URL string
 	// Speed sets the serial link speed (in bps, rtu only)
-	Speed uint32
+	Speed uint
 	// DataBits sets the number of bits per serial character (rtu only)
 	DataBits uint8
 	// Parity sets the serial link parity mode (rtu only)
