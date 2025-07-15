@@ -568,25 +568,35 @@ func (mc *ModbusClient) WriteCoils(addr uint16, values []bool) error {
 
 	encodedValues = encodeBools(values)
 
+	// create and fill in the request object
 	req = &pdu{
 		unitId:       mc.unitId,
 		functionCode: fcWriteMultipleCoils,
 	}
 
+	// start address
 	req.payload = uint16ToBytes(BIG_ENDIAN, addr)
+	// quantity
 	req.payload = append(req.payload, uint16ToBytes(BIG_ENDIAN, quantity)...)
+	// byte count
 	req.payload = append(req.payload, byte(len(encodedValues)))
+	// payload
 	req.payload = append(req.payload, encodedValues...)
 
+	// run the request across the transport and wait for a response
 	res, err := mc.executeRequest(req)
 	if err != nil {
 		return err
 	}
 
+	// validate the response code
 	switch {
 	case res.functionCode == req.functionCode:
+		// expect 4 bytes (2 byte of address + 2 bytes of quantity)
 		if len(res.payload) != 4 ||
+			// bytes 1-2 should be the base coil address
 			bytesToUint16(BIG_ENDIAN, res.payload[0:2]) != addr ||
+			// bytes 3-4 should be the quantity of coils
 			bytesToUint16(BIG_ENDIAN, res.payload[2:4]) != quantity {
 			return ErrProtocolError
 		}
@@ -614,23 +624,31 @@ func (mc *ModbusClient) WriteRegister(addr uint16, value uint16) error {
 	mc.lock.Lock()
 	defer mc.lock.Unlock()
 
+	// create and fill in the request object
 	req = &pdu{
 		unitId:       mc.unitId,
 		functionCode: fcWriteSingleRegister,
 	}
 
+	// register address
 	req.payload = uint16ToBytes(BIG_ENDIAN, addr)
+	// register value
 	req.payload = append(req.payload, uint16ToBytes(mc.endianness, value)...)
 
+	// run the request across the transport and wait for a response
 	res, err := mc.executeRequest(req)
 	if err != nil {
 		return err
 	}
 
+	// validate the response code
 	switch {
 	case res.functionCode == req.functionCode:
+		// expect 4 bytes (2 byte of address + 2 bytes of value)
 		if len(res.payload) != 4 ||
+			// bytes 1-2 should be the register address
 			bytesToUint16(BIG_ENDIAN, res.payload[0:2]) != addr ||
+			// bytes 3-4 should be the value
 			bytesToUint16(mc.endianness, res.payload[2:4]) != value {
 			return ErrProtocolError
 		}
@@ -654,6 +672,7 @@ func (mc *ModbusClient) WriteRegister(addr uint16, value uint16) error {
 func (mc *ModbusClient) WriteRegisters(addr uint16, values []uint16) error {
 	var payload []byte
 
+	// turn registers to bytes
 	for _, value := range values {
 		payload = append(payload, uint16ToBytes(mc.endianness, value)...)
 	}
@@ -665,6 +684,7 @@ func (mc *ModbusClient) WriteRegisters(addr uint16, values []uint16) error {
 func (mc *ModbusClient) WriteUint32s(addr uint16, values []uint32) error {
 	var payload []byte
 
+	// turn registers to bytes
 	for _, value := range values {
 		payload = append(payload, uint32ToBytes(mc.endianness, mc.wordOrder, value)...)
 	}
@@ -681,6 +701,7 @@ func (mc *ModbusClient) WriteUint32(addr uint16, value uint32) error {
 func (mc *ModbusClient) WriteFloat32s(addr uint16, values []float32) error {
 	var payload []byte
 
+	// turn registers to bytes
 	for _, value := range values {
 		payload = append(payload, float32ToBytes(mc.endianness, mc.wordOrder, value)...)
 	}
@@ -697,6 +718,7 @@ func (mc *ModbusClient) WriteFloat32(addr uint16, value float32) error {
 func (mc *ModbusClient) WriteUint64s(addr uint16, values []uint64) error {
 	var payload []byte
 
+	// turn registers to bytes
 	for _, value := range values {
 		payload = append(payload, uint64ToBytes(mc.endianness, mc.wordOrder, value)...)
 	}
@@ -713,6 +735,7 @@ func (mc *ModbusClient) WriteUint64(addr uint16, value uint64) error {
 func (mc *ModbusClient) WriteFloat64s(addr uint16, values []float64) error {
 	var payload []byte
 
+	// turn registers to bytes
 	for _, value := range values {
 		payload = append(payload, float64ToBytes(mc.endianness, mc.wordOrder, value)...)
 	}
@@ -743,6 +766,8 @@ func (mc *ModbusClient) WriteRawBytes(addr uint16, values []byte) error {
 /*** unexported methods ***/
 // Reads one or multiple 16-bit registers (function code 03 or 04) as bytes.
 func (mc *ModbusClient) readBytes(addr uint16, quantity uint16, regType RegType, observeEndianness bool) ([]byte, error) {
+	// read enough registers to get the requested number of bytes
+	// (2 bytes per reg)
 	regCount := (quantity / 2) + (quantity % 2)
 
 	values, err := mc.readRegisters(addr, regCount, regType)
@@ -750,12 +775,15 @@ func (mc *ModbusClient) readBytes(addr uint16, quantity uint16, regType RegType,
 		return nil, err
 	}
 
+	// swap bytes on register boundaries if requested by the caller
+	// and endianness is set to little endian
 	if observeEndianness && mc.endianness == LITTLE_ENDIAN {
 		for i := 0; i < len(values); i += 2 {
 			values[i], values[i+1] = values[i+1], values[i]
 		}
 	}
 
+	// pop the last byte on odd quantities
 	if quantity%2 == 1 {
 		values = values[0 : len(values)-1]
 	}
@@ -765,10 +793,13 @@ func (mc *ModbusClient) readBytes(addr uint16, quantity uint16, regType RegType,
 
 // Writes the given slice of bytes to 16-bit registers starting at addr.
 func (mc *ModbusClient) writeBytes(addr uint16, values []byte, observeEndianness bool) error {
+	// pad odd quantities to make for full registers
 	if len(values)%2 == 1 {
 		values = append(values, 0x00)
 	}
 
+	// swap bytes on register boundaries if requested by the caller
+	// and endianness is set to little endian
 	if observeEndianness && mc.endianness == LITTLE_ENDIAN {
 		for i := 0; i < len(values); i += 2 {
 			values[i], values[i+1] = values[i+1], values[i]
@@ -803,6 +834,7 @@ func (mc *ModbusClient) readBools(addr uint16, quantity uint16, di bool) ([]bool
 		return nil, ErrUnexpectedParameters
 	}
 
+	// create and fill in the request object
 	req = &pdu{
 		unitId: mc.unitId,
 	}
@@ -813,16 +845,21 @@ func (mc *ModbusClient) readBools(addr uint16, quantity uint16, di bool) ([]bool
 		req.functionCode = fcReadCoils
 	}
 
+	// start address
 	req.payload = uint16ToBytes(BIG_ENDIAN, addr)
+	// quantity
 	req.payload = append(req.payload, uint16ToBytes(BIG_ENDIAN, quantity)...)
 
+	// run the request across the transport and wait for a response
 	res, err := mc.executeRequest(req)
 	if err != nil {
 		return nil, err
 	}
 
+	// validate the response code
 	switch {
 	case res.functionCode == req.functionCode:
+		// expect a payload of 1 byte (byte count) + 1 byte for 8 coils/discrete inputs)
 		expectedLen = 1
 		expectedLen += int(quantity) / 8
 		if quantity%8 != 0 {
@@ -833,10 +870,12 @@ func (mc *ModbusClient) readBools(addr uint16, quantity uint16, di bool) ([]bool
 			return nil, ErrProtocolError
 		}
 
+		// validate the byte count field
 		if int(res.payload[0])+1 != expectedLen {
 			return nil, ErrProtocolError
 		}
 
+		// turn bits into a bool slice
 		return decodeBools(quantity, res.payload[1:]), nil
 
 	case res.functionCode == (req.functionCode | 0x80):
@@ -860,6 +899,7 @@ func (mc *ModbusClient) readRegisters(addr uint16, quantity uint16, regType RegT
 	mc.lock.Lock()
 	defer mc.lock.Unlock()
 
+	// create and fill in the request object
 	req = &pdu{
 		unitId: mc.unitId,
 	}
@@ -889,24 +929,33 @@ func (mc *ModbusClient) readRegisters(addr uint16, quantity uint16, regType RegT
 		return nil, ErrUnexpectedParameters
 	}
 
+	// start address
 	req.payload = uint16ToBytes(BIG_ENDIAN, addr)
+	// quantity
 	req.payload = append(req.payload, uint16ToBytes(BIG_ENDIAN, quantity)...)
 
+	// run the request across the transport and wait for a response
 	res, err := mc.executeRequest(req)
 	if err != nil {
 		return nil, err
 	}
 
+	// validate the response code
 	switch {
 	case res.functionCode == req.functionCode:
+		// make sure the payload length is what we expect
+		// (1 byte of length + 2 bytes per register)
 		if len(res.payload) != 1+2*int(quantity) {
 			return nil, ErrProtocolError
 		}
 
+		// validate the byte count field
+		// (2 bytes per register * number of registers)
 		if uint(res.payload[0]) != 2*uint(quantity) {
 			return nil, ErrProtocolError
 		}
 
+		// remove the byte count field from the returned slice
 		return res.payload[1:], nil
 
 	case res.functionCode == (req.functionCode | 0x80):
@@ -956,20 +1005,29 @@ func (mc *ModbusClient) writeRegisters(addr uint16, values []byte) error {
 		functionCode: fcWriteMultipleRegisters,
 	}
 
+	// base address
 	req.payload = uint16ToBytes(BIG_ENDIAN, addr)
+	// quantity of registers (2 bytes per register)
 	req.payload = append(req.payload, uint16ToBytes(BIG_ENDIAN, quantity)...)
+	// byte count
 	req.payload = append(req.payload, byte(payloadLength))
+	// registers value
 	req.payload = append(req.payload, values...)
 
+	// run the request across the transport and wait for a response
 	res, err := mc.executeRequest(req)
 	if err != nil {
 		return err
 	}
 
+	// validate the response code
 	switch {
 	case res.functionCode == req.functionCode:
+		// expect 4 bytes (2 byte of address + 2 bytes of quantity)
 		if len(res.payload) != 4 ||
+			// bytes 1-2 should be the base register address
 			bytesToUint16(BIG_ENDIAN, res.payload[0:2]) != addr ||
+			// bytes 3-4 should be the quantity of registers (2 bytes per register)
 			bytesToUint16(BIG_ENDIAN, res.payload[2:4]) != quantity {
 			return ErrProtocolError
 		}
@@ -990,17 +1048,21 @@ func (mc *ModbusClient) writeRegisters(addr uint16, values []byte) error {
 }
 
 func (mc *ModbusClient) executeRequest(req *pdu) (*pdu, error) {
+	// send the request over the wire, wait for and decode the response
 	res, err := mc.transport.ExecuteRequest(req)
 	if err != nil {
+		// map i/o timeouts to ErrRequestTimedOut
 		if os.IsTimeout(err) {
 			return nil, ErrRequestTimedOut
 		}
 		return nil, err
 	}
 
+	// make sure the source unit id matches that of the request
 	if (res.functionCode&0x80) == 0x00 && res.unitId != req.unitId {
 		return nil, ErrBadUnitId
 	}
+	// accept errors from gateway devices (using special unit id #255)
 	if (res.functionCode&0x80) == 0x80 &&
 		(res.unitId != req.unitId && res.unitId != 0xff) {
 		return nil, ErrBadUnitId

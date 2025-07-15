@@ -401,9 +401,12 @@ func (ms *ModbusServer) handleTransport(t transport, clientAddr string, clientRo
 				break
 			}
 
+			// decode address and quantity fields
 			addr = bytesToUint16(BIG_ENDIAN, req.payload[0:2])
 			quantity = bytesToUint16(BIG_ENDIAN, req.payload[2:4])
 
+			// ensure the reply never exceeds the maximum PDU length and we
+			// never read past 0xffff
 			if quantity > 2000 || quantity == 0 {
 				err = ErrProtocolError
 				break
@@ -413,6 +416,7 @@ func (ms *ModbusServer) handleTransport(t transport, clientAddr string, clientRo
 				break
 			}
 
+			// invoke the appropriate handler
 			var coils []bool
 			if req.functionCode == fcReadCoils {
 				coils, err = ms.handler.HandleCoils(&CoilsRequest{
@@ -435,6 +439,7 @@ func (ms *ModbusServer) handleTransport(t transport, clientAddr string, clientRo
 					})
 			}
 
+			// make sure the handler returned the expected number of items
 			if err == nil && len(coils) != int(quantity) {
 				ms.logger.Error("unexpected number of coils returned", "got", len(coils), "expected", quantity)
 				err = ErrServerDeviceFailure

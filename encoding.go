@@ -81,12 +81,14 @@ func uint32ToBytes(endianness Endianness, wordOrder WordOrder, in uint32) []byte
 	case BIG_ENDIAN:
 		binary.BigEndian.PutUint32(out, in)
 
+		// swap words if needed
 		if wordOrder == LOW_WORD_FIRST {
 			out[0], out[1], out[2], out[3] = out[2], out[3], out[0], out[1]
 		}
 	case LITTLE_ENDIAN:
 		binary.LittleEndian.PutUint32(out, in)
 
+		// swap words if needed
 		if wordOrder == HIGH_WORD_FIRST {
 			out[0], out[1], out[2], out[3] = out[2], out[3], out[0], out[1]
 		}
@@ -147,6 +149,7 @@ func uint64ToBytes(endianness Endianness, wordOrder WordOrder, in uint64) []byte
 	case BIG_ENDIAN:
 		binary.BigEndian.PutUint64(out, in)
 
+		// swap words if needed
 		if wordOrder == LOW_WORD_FIRST {
 			out[0], out[1], out[2], out[3], out[4], out[5], out[6], out[7] =
 				out[6], out[7], out[4], out[5], out[2], out[3], out[0], out[1]
@@ -154,6 +157,7 @@ func uint64ToBytes(endianness Endianness, wordOrder WordOrder, in uint64) []byte
 	case LITTLE_ENDIAN:
 		binary.LittleEndian.PutUint64(out, in)
 
+		// swap words if needed
 		if wordOrder == HIGH_WORD_FIRST {
 			out[0], out[1], out[2], out[3], out[4], out[5], out[6], out[7] =
 				out[6], out[7], out[4], out[5], out[2], out[3], out[0], out[1]

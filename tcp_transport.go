@@ -14,9 +14,9 @@ const (
 )
 
 type tcpTransport struct {
-	logger    *slog.Logger
 	socket    net.Conn
 	timeout   time.Duration
+	logger    *slog.Logger
 	lastTxnId uint16
 }
 
@@ -30,10 +30,12 @@ func newTCPTransport(socket net.Conn, timeout time.Duration, logger *slog.Logger
 	}
 }
 
+// Closes the underlying tcp socket.
 func (tt *tcpTransport) Close() error {
 	return tt.socket.Close()
 }
 
+// Runs a request across the socket and returns a response.
 func (tt *tcpTransport) ExecuteRequest(req *pdu) (*pdu, error) {
 	err := tt.socket.SetDeadline(time.Now().Add(tt.timeout))
 	if err != nil {
@@ -50,6 +52,7 @@ func (tt *tcpTransport) ExecuteRequest(req *pdu) (*pdu, error) {
 	return tt.readResponse()
 }
 
+// Reads a request from the socket.
 func (tt *tcpTransport) ReadRequest() (*pdu, error) {
 	err := tt.socket.SetDeadline(time.Now().Add(tt.timeout))
 	if err != nil {
@@ -66,11 +69,14 @@ func (tt *tcpTransport) ReadRequest() (*pdu, error) {
 	return req, nil
 }
 
+// Writes a response to the socket.
 func (tt *tcpTransport) WriteResponse(res *pdu) error {
 	_, err := tt.socket.Write(tt.assembleMBAPFrame(tt.lastTxnId, res))
 	return err
 }
 
+// Reads as many MBAP+modbus frames as necessary until either the response
+// matching tt.lastTxnId is received or an error occurs.
 func (tt *tcpTransport) readResponse() (*pdu, error) {
 	for {
 		res, _, err := tt.readMBAPFrame()
@@ -87,6 +93,7 @@ func (tt *tcpTransport) readResponse() (*pdu, error) {
 	}
 }
 
+// Reads an entire frame (MBAP header + modbus PDU) from the socket.
 func (tt *tcpTransport) readMBAPFrame() (*pdu, uint16, error) {
 	rxbuf := make([]byte, mbapHeaderLength)
 	_, err := io.ReadFull(tt.socket, rxbuf)
@@ -128,6 +135,7 @@ func (tt *tcpTransport) readMBAPFrame() (*pdu, uint16, error) {
 	return p, txnId, nil
 }
 
+// Turns a PDU into an MBAP frame (MBAP header + PDU) and returns it as bytes.
 func (tt *tcpTransport) assembleMBAPFrame(txnId uint16, p *pdu) []byte {
 	payload := uint16ToBytes(BIG_ENDIAN, txnId)
 	payload = append(payload, 0x00, 0x00)

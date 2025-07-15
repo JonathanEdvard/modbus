@@ -84,6 +84,7 @@ const (
 	ErrUnexpectedParameters    Error = "unexpected parameters"
 )
 
+// mapExceptionCodeToError turns a modbus exception code into a higher level Error object.
 func mapExceptionCodeToError(exceptionCode uint8) error {
 	switch exceptionCode {
 	case exIllegalFunction:

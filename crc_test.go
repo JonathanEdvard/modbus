@@ -6,8 +6,7 @@ import (
 )
 
 func TestCRC(t *testing.T) {
-	c := crc{}
-	c.init()
+	c := newCRC()
 	c.add([]byte{0x01, 0x03, 0x00, 0x00, 0x00, 0x02})
 	got := c.value()
 	want := []byte{0xC4, 0x0B}
@@ -19,8 +18,7 @@ func TestCRC(t *testing.T) {
 		t.Errorf("isEqual false for correct CRC")
 	}
 
-	d := crc{}
-	d.init()
+	d := newCRC()
 	d.add([]byte{0x01, 0x04, 0x02, 0xFF, 0xFF})
 	got = d.value()
 	want = []byte{0xB8, 0x80}

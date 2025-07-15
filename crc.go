@@ -41,12 +41,8 @@ type crc struct {
 
 func newCRC() *crc {
 	c := &crc{}
-	c.init()
-	return c
-}
-
-func (c *crc) init() {
 	c.crc = 0xffff
+	return c
 }
 
 func (c *crc) add(in []byte) {
@@ -59,6 +55,7 @@ func (c *crc) add(in []byte) {
 	}
 }
 
+// Returns the CRC as two bytes, swapped.
 func (c *crc) value() []byte {
 	return uint16ToBytes(LITTLE_ENDIAN, c.crc)
 }
