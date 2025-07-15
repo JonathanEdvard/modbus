@@ -50,29 +50,25 @@ func (rt *rtuTransport) Close() error {
 }
 
 func (rt *rtuTransport) ExecuteRequest(req *pdu) (*pdu, error) {
-	var ts time.Time
-	var t time.Duration
-	var n int
-	var err error
 
-	err = rt.link.SetDeadline(time.Now().Add(rt.timeout))
+	err := rt.link.SetDeadline(time.Now().Add(rt.timeout))
 	if err != nil {
 		return nil, err
 	}
 
-	t = time.Since(rt.lastActivity.Add(rt.t35))
-	if t < 0 {
-		time.Sleep(t * (-1))
+	timeBeforeStart := time.Since(rt.lastActivity.Add(rt.t35))
+	if timeBeforeStart < 0 {
+		time.Sleep(timeBeforeStart * (-1))
 	}
 
-	ts = time.Now()
+	timestampStart := time.Now()
 
-	n, err = rt.link.Write(rt.assembleRTUFrame(req))
+	n, err := rt.link.Write(rt.assembleRTUFrame(req))
 	if err != nil {
 		return nil, err
 	}
 
-	rt.lastActivity = ts.Add(time.Duration(n) * rt.t1)
+	rt.lastActivity = timestampStart.Add(time.Duration(n) * rt.t1)
 
 	time.Sleep(time.Until(rt.lastActivity.Add(rt.t35)))
 
@@ -95,10 +91,7 @@ func (rt *rtuTransport) ReadRequest() (*pdu, error) {
 }
 
 func (rt *rtuTransport) WriteResponse(res *pdu) error {
-	var n int
-	var err error
-
-	n, err = rt.link.Write(rt.assembleRTUFrame(res))
+	n, err := rt.link.Write(rt.assembleRTUFrame(res))
 	if err != nil {
 		return err
 	}
@@ -109,15 +102,9 @@ func (rt *rtuTransport) WriteResponse(res *pdu) error {
 }
 
 func (rt *rtuTransport) readRTUFrame() (*pdu, error) {
-	var rxbuf []byte
-	var byteCount int
-	var bytesNeeded int
-	var crc crc
-	var err error
+	rxbuf := make([]byte, maxRTUFrameLength)
 
-	rxbuf = make([]byte, maxRTUFrameLength)
-
-	byteCount, err = io.ReadFull(rt.link, rxbuf[0:3])
+	byteCount, err := io.ReadFull(rt.link, rxbuf[0:3])
 	if (byteCount > 0 || err == nil) && byteCount != 3 {
 		return nil, ErrShortFrame
 	}
@@ -125,47 +112,44 @@ func (rt *rtuTransport) readRTUFrame() (*pdu, error) {
 		return nil, err
 	}
 
-	bytesNeeded, err = expectedResponseLength(uint8(rxbuf[1]), uint8(rxbuf[2]))
+	bytesExpected, err := expectedResponseLength(uint8(rxbuf[1]), uint8(rxbuf[2]))
 	if err != nil {
 		return nil, err
 	}
+	bytesExpected += 2 // 2 bytes for CRC
 
-	bytesNeeded += 2
-
-	if byteCount+bytesNeeded > maxRTUFrameLength {
+	if byteCount+bytesExpected > maxRTUFrameLength {
 		return nil, ErrProtocolError
 	}
 
-	byteCount, err = io.ReadFull(rt.link, rxbuf[3:3+bytesNeeded])
+	byteCount, err = io.ReadFull(rt.link, rxbuf[3:3+bytesExpected])
 	if err != nil && err != io.ErrUnexpectedEOF {
 		return nil, err
 	}
-	if byteCount != bytesNeeded {
-		rt.logger.Warn("wrong byteCount", "expected", bytesNeeded, "received", byteCount)
+	if byteCount != bytesExpected {
+		rt.logger.Warn("wrong byteCount", "expected", bytesExpected, "received", byteCount)
 		return nil, ErrShortFrame
 	}
 
-	crc.init()
-	crc.add(rxbuf[0 : 3+bytesNeeded-2])
+	crc := newCRC()
+	crc.add(rxbuf[0 : 3+bytesExpected-2])
 
-	if !crc.isEqual(rxbuf[3+bytesNeeded-2], rxbuf[3+bytesNeeded-1]) {
+	if !crc.isEqual(rxbuf[3+bytesExpected-2], rxbuf[3+bytesExpected-1]) {
 		return nil, ErrBadCRC
 	}
 
 	return &pdu{
 		unitId:       rxbuf[0],
 		functionCode: rxbuf[1],
-		payload:      rxbuf[2 : 3+bytesNeeded-2],
+		payload:      rxbuf[2 : 3+bytesExpected-2],
 	}, nil
 }
 
 func (rt *rtuTransport) assembleRTUFrame(p *pdu) []byte {
-	var crc crc
-
 	adu := []byte{p.unitId, p.functionCode}
 	adu = append(adu, p.payload...)
 
-	crc.init()
+	crc := newCRC()
 	crc.add(adu)
 
 	adu = append(adu, crc.value()...)

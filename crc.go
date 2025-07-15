@@ -39,6 +39,12 @@ type crc struct {
 	crc uint16
 }
 
+func newCRC() *crc {
+	c := &crc{}
+	c.init()
+	return c
+}
+
 func (c *crc) init() {
 	c.crc = 0xffff
 }
