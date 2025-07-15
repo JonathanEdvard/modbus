@@ -4,7 +4,7 @@ import (
 	"fmt"
 )
 
-type transportType uint
+type transportType uint8
 
 const (
 	modbusRTU        transportType = 1
@@ -30,10 +30,8 @@ type pdu struct {
 
 type Error string
 
-// Error implements the error interface.
-func (me Error) Error() (s string) {
-	s = string(me)
-	return
+func (me Error) Error() string {
+	return string(me)
 }
 
 const (
@@ -53,10 +51,6 @@ const (
 	fcMaskWriteRegister          uint8 = 0x16
 	fcReadWriteMultipleRegisters uint8 = 0x17
 	fcReadFifoQueue              uint8 = 0x18
-
-	// file access
-	//fcReadFileRecord             uint8 = 0x14
-	//fcWriteFileRecord            uint8 = 0x15
 
 	// exception codes
 	exIllegalFunction         uint8 = 0x01
@@ -91,57 +85,52 @@ const (
 )
 
 // mapExceptionCodeToError turns a modbus exception code into a higher level Error object.
-func mapExceptionCodeToError(exceptionCode uint8) (err error) {
+func mapExceptionCodeToError(exceptionCode uint8) error {
 	switch exceptionCode {
 	case exIllegalFunction:
-		err = ErrIllegalFunction
+		return ErrIllegalFunction
 	case exIllegalDataAddress:
-		err = ErrIllegalDataAddress
+		return ErrIllegalDataAddress
 	case exIllegalDataValue:
-		err = ErrIllegalDataValue
+		return ErrIllegalDataValue
 	case exServerDeviceFailure:
-		err = ErrServerDeviceFailure
+		return ErrServerDeviceFailure
 	case exAcknowledge:
-		err = ErrAcknowledge
+		return ErrAcknowledge
 	case exMemoryParityError:
-		err = ErrMemoryParityError
+		return ErrMemoryParityError
 	case exServerDeviceBusy:
-		err = ErrServerDeviceBusy
+		return ErrServerDeviceBusy
 	case exGWPathUnavailable:
-		err = ErrGWPathUnavailable
+		return ErrGWPathUnavailable
 	case exGWTargetFailedToRespond:
-		err = ErrGWTargetFailedToRespond
+		return ErrGWTargetFailedToRespond
 	default:
-		err = fmt.Errorf("unknown exception code (%v)", exceptionCode)
+		return fmt.Errorf("unknown exception code (%v)", exceptionCode)
 	}
-
-	return
 }
 
-// mapErrorToExceptionCode turns an Error object into a modbus exception code.
-func mapErrorToExceptionCode(err error) (exceptionCode uint8) {
+func mapErrorToExceptionCode(err error) uint8 {
 	switch err {
 	case ErrIllegalFunction:
-		exceptionCode = exIllegalFunction
+		return exIllegalFunction
 	case ErrIllegalDataAddress:
-		exceptionCode = exIllegalDataAddress
+		return exIllegalDataAddress
 	case ErrIllegalDataValue:
-		exceptionCode = exIllegalDataValue
+		return exIllegalDataValue
 	case ErrServerDeviceFailure:
-		exceptionCode = exServerDeviceFailure
+		return exServerDeviceFailure
 	case ErrAcknowledge:
-		exceptionCode = exAcknowledge
+		return exAcknowledge
 	case ErrMemoryParityError:
-		exceptionCode = exMemoryParityError
+		return exMemoryParityError
 	case ErrServerDeviceBusy:
-		exceptionCode = exServerDeviceBusy
+		return exServerDeviceBusy
 	case ErrGWPathUnavailable:
-		exceptionCode = exGWPathUnavailable
+		return exGWPathUnavailable
 	case ErrGWTargetFailedToRespond:
-		exceptionCode = exGWTargetFailedToRespond
+		return exGWTargetFailedToRespond
 	default:
-		exceptionCode = exServerDeviceFailure
+		return exServerDeviceFailure
 	}
-
-	return
 }

@@ -1,11 +1,11 @@
 package modbus
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/asn1"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net"
 	"strings"
@@ -151,6 +151,8 @@ type ModbusServer struct {
 	tcpListener   net.Listener
 	tcpClients    []net.Conn
 	transportType transportType
+	ctx           context.Context
+	cancel        context.CancelFunc
 }
 
 // Returns a new modbus server.
@@ -233,13 +235,15 @@ func NewServer(conf *ServerConfiguration, reqHandler RequestHandler) (
 }
 
 // Starts accepting client connections.
-func (ms *ModbusServer) Start() (err error) {
+func (ms *ModbusServer) Start(ctx context.Context) (err error) {
 	ms.lock.Lock()
 	defer ms.lock.Unlock()
 
 	if ms.started {
 		return
 	}
+
+	ms.ctx, ms.cancel = context.WithCancel(ctx)
 
 	switch ms.transportType {
 	case modbusTCP, modbusTCPOverTLS:
@@ -272,6 +276,7 @@ func (ms *ModbusServer) Stop() (err error) {
 	}
 
 	ms.started = false
+	ms.cancel()
 
 	if ms.transportType == modbusTCP || ms.transportType == modbusTCPOverTLS {
 		// close the server socket if we're listening over TCP
@@ -290,46 +295,45 @@ func (ms *ModbusServer) Stop() (err error) {
 // Each connection is served from a dedicated goroutine to allow for concurrent
 // connections.
 func (ms *ModbusServer) acceptTCPClients() {
-	var sock net.Conn
-	var err error
-	var accepted bool
 
 	for {
-		sock, err = ms.tcpListener.Accept()
-		if err != nil {
-			// if the server socket has just been closed, return here as
-			// this goroutine isn't going to see any new client connection
-			if errors.Is(err, net.ErrClosed) {
-				break
+		select {
+		case <-ms.ctx.Done():
+			return
+		default:
+			sock, err := ms.tcpListener.Accept()
+			if err != nil {
+				// if the server socket has just been closed, return here as
+				// this goroutine isn't going to see any new client connection
+				if errors.Is(err, net.ErrClosed) {
+					break
+				}
+				ms.logger.Warn("failed to accept client connection", "error", err)
+				continue
 			}
-			ms.logger.Warn("failed to accept client connection", "err", err)
-			continue
-		}
 
-		ms.lock.Lock()
-		// apply a connection limit
-		if ms.started && uint(len(ms.tcpClients)) < ms.conf.MaxClients {
-			accepted = true
-			// add the new client connection to the pool
-			ms.tcpClients = append(ms.tcpClients, sock)
-		} else {
-			accepted = false
-		}
-		ms.lock.Unlock()
+			ms.lock.Lock()
+			var accepted bool
+			// apply a connection limit
+			if ms.started && uint(len(ms.tcpClients)) < ms.conf.MaxClients {
+				accepted = true
+				// add the new client connection to the pool
+				ms.tcpClients = append(ms.tcpClients, sock)
+			} else {
+				accepted = false
+			}
+			ms.lock.Unlock()
 
-		if accepted {
-			// spin a client handler goroutine to serve the new client
-			go ms.handleTCPClient(sock)
-		} else {
-			ms.logger.Warn("max. number of concurrent connections "+
-				"reached, rejecting", "remoteAddr", sock.RemoteAddr())
-			// discard the connection
-			sock.Close()
+			if accepted {
+				// spin a client handler goroutine to serve the new client
+				go ms.handleTCPClient(sock)
+			} else {
+				ms.logger.Warn("max. number of concurrent connections "+
+					"reached, rejecting", "remoteAddr", sock.RemoteAddr())
+				sock.Close()
+			}
 		}
 	}
-
-	// if we reach this point, the server socket has been closed
-	ms.logger.Info("stopping TCP server, listner closed")
 }
 
 // Handles a TCP client connection.
@@ -337,10 +341,6 @@ func (ms *ModbusServer) acceptTCPClients() {
 // out, or an unrecoverable error happened), the TCP socket is closed and removed
 // from the list of active client connections.
 func (ms *ModbusServer) handleTCPClient(sock net.Conn) {
-	var err error
-	var clientRole string
-	var tlsSock net.Conn
-
 	switch ms.transportType {
 	case modbusTCP:
 		// serve modbus requests over the raw TCP connection
@@ -349,20 +349,18 @@ func (ms *ModbusServer) handleTCPClient(sock net.Conn) {
 			sock.RemoteAddr().String(), "")
 
 	case modbusTCPOverTLS:
+		var tlsSock net.Conn
+
 		// start TLS negotiation over the raw TCP connection
-		tlsSock, clientRole, err = ms.startTLS(sock)
+		tlsSock, clientRole, err := ms.startTLS(sock)
 		if err != nil {
-			ms.logger.Warn("TLS handshake with %s failed: %v",
-				sock.RemoteAddr().String(), err)
+			ms.logger.Warn("TLS handshake failed", "client", sock.RemoteAddr().String(), "error", err)
 		} else {
 			// serve modbus requests over the TLS tunnel
 			ms.handleTransport(
 				newTCPTransport(tlsSock, ms.conf.Timeout, ms.conf.Logger),
 				sock.RemoteAddr().String(), clientRole)
 		}
-
-	default:
-		ms.logger.Error("unimplemented transport type", "type", ms.transportType)
 	}
 
 	// once done, remove our connection from the list of active client conns
@@ -392,17 +390,12 @@ func (ms *ModbusServer) handleTransport(t transport, clientAddr string, clientRo
 
 	for {
 		req, err = t.ReadRequest()
-		ms.logger.Info("Modbus request", "req", req, "err", err)
-
 		if err != nil {
 			break
 		}
 
 		switch req.functionCode {
 		case fcReadCoils, fcReadDiscreteInputs:
-			var coils []bool
-			var regCount int
-
 			if len(req.payload) != 4 {
 				err = ErrProtocolError
 				break
@@ -424,6 +417,7 @@ func (ms *ModbusServer) handleTransport(t transport, clientAddr string, clientRo
 			}
 
 			// invoke the appropriate handler
+			var coils []bool
 			if req.functionCode == fcReadCoils {
 				coils, err = ms.handler.HandleCoils(&CoilsRequest{
 					ClientAddr: clientAddr,
@@ -444,11 +438,10 @@ func (ms *ModbusServer) handleTransport(t transport, clientAddr string, clientRo
 						Quantity:   quantity,
 					})
 			}
-			regCount = len(coils)
 
 			// make sure the handler returned the expected number of items
-			if err == nil && regCount != int(quantity) {
-				ms.logger.Error("unexpected", "regCount", regCount, "quantit", quantity)
+			if err == nil && len(coils) != int(quantity) {
+				ms.logger.Error("unexpected number of coils returned", "got", len(coils), "expected", quantity)
 				err = ErrServerDeviceFailure
 				break
 			}
@@ -465,8 +458,8 @@ func (ms *ModbusServer) handleTransport(t transport, clientAddr string, clientRo
 			}
 
 			// byte count (1 byte for 8 coils)
-			res.payload[0] = uint8(regCount / 8)
-			if regCount%8 != 0 {
+			res.payload[0] = uint8(len(coils) / 8)
+			if len(coils)%8 != 0 {
 				res.payload[0]++
 			}
 
@@ -584,9 +577,6 @@ func (ms *ModbusServer) handleTransport(t transport, clientAddr string, clientRo
 				uint16ToBytes(BIG_ENDIAN, quantity)...)
 
 		case fcReadHoldingRegisters, fcReadInputRegisters:
-			var regs []uint16
-			var regCount int
-
 			if len(req.payload) != 4 {
 				err = ErrProtocolError
 				break
@@ -608,6 +598,7 @@ func (ms *ModbusServer) handleTransport(t transport, clientAddr string, clientRo
 			}
 
 			// invoke the appropriate handler
+			var regs []uint16
 			if req.functionCode == fcReadHoldingRegisters {
 				regs, err = ms.handler.HandleHoldingRegisters(
 					&HoldingRegistersRequest{
@@ -629,11 +620,10 @@ func (ms *ModbusServer) handleTransport(t transport, clientAddr string, clientRo
 						Quantity:   quantity,
 					})
 			}
-			regCount = len(regs)
 
 			// make sure the handler returned the expected number of items
-			if err == nil && regCount != int(quantity) {
-				ms.logger.Error("handler returned wrong number of words", "received", regCount, "expected", quantity)
+			if err == nil && len(regs) != int(quantity) {
+				ms.logger.Error("unexpected number of registers returned", "got", len(regs), "expected", quantity)
 				err = ErrServerDeviceFailure
 				break
 			}
@@ -650,15 +640,13 @@ func (ms *ModbusServer) handleTransport(t transport, clientAddr string, clientRo
 			}
 
 			// byte count (2 bytes per register)
-			res.payload[0] = uint8(regCount * 2)
+			res.payload[0] = uint8(len(regs) * 2)
 
 			// register values
 			res.payload = append(res.payload,
 				uint16sToBytes(BIG_ENDIAN, regs)...)
 
 		case fcWriteSingleRegister:
-			var value uint16
-
 			if len(req.payload) != 4 {
 				err = ErrProtocolError
 				break
@@ -666,7 +654,7 @@ func (ms *ModbusServer) handleTransport(t transport, clientAddr string, clientRo
 
 			// decode address and value fields
 			addr = bytesToUint16(BIG_ENDIAN, req.payload[0:2])
-			value = bytesToUint16(BIG_ENDIAN, req.payload[2:4])
+			value := bytesToUint16(BIG_ENDIAN, req.payload[2:4])
 
 			// invoke the handler
 			_, err = ms.handler.HandleHoldingRegisters(
@@ -734,7 +722,6 @@ func (ms *ModbusServer) handleTransport(t transport, clientAddr string, clientRo
 			}
 
 			// invoke the holding register handler
-			ms.logger.Info("invoke write handler")
 			_, err = ms.handler.HandleHoldingRegisters(
 				&HoldingRegistersRequest{
 					ClientAddr: clientAddr,
@@ -778,21 +765,14 @@ func (ms *ModbusServer) handleTransport(t transport, clientAddr string, clientRo
 		// and log an error
 		if err == nil && res == nil {
 			err = ErrServerDeviceFailure
-			ms.logger.Error(fmt.Sprintf("internal server error (req: %v, res: %v, err: %v)",
-				req, res, err))
+			ms.logger.Error("internal server error", "req", req)
 		}
 
 		// map go errors to modbus errors, unless the error is a protocol error,
 		// in which case close the transport and return.
 		if err != nil {
 			if err == ErrProtocolError {
-				ms.logger.Warn(
-					fmt.Sprintf("protocol error, closing link (client address: %s, functionCode=%d, unitID=%d, payload=%v)",
-						clientAddr,
-						req.functionCode,
-						req.unitId,
-						req.payload,
-					))
+				ms.logger.Warn("protocol error, closing link", "clientAddr", clientAddr, "req", req)
 				t.Close()
 				return
 			} else {
@@ -869,7 +849,6 @@ func (ms *ModbusServer) startTLS(tcpSock net.Conn) (
 // If no role extension is found, a nil string is returned (R-23).
 // If multiple or invalid role extensions are found, a nil string is returned (R-65, R-22).
 func (ms *ModbusServer) extractRole(cert *x509.Certificate) (role string) {
-	var err error
 	var found bool
 	var badCert bool
 
@@ -893,7 +872,7 @@ func (ms *ModbusServer) extractRole(cert *x509.Certificate) (role string) {
 			}
 
 			// extract the ASN1 string
-			_, err = asn1.Unmarshal(ext.Value, &role)
+			_, err := asn1.Unmarshal(ext.Value, &role)
 			if err != nil {
 				ms.logger.Warn("failed to decode Modbus Role extension", "error", err)
 				badCert = true
